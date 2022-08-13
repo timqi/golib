@@ -1,11 +1,11 @@
 // log package for universal mono projects
 // base methods provided should info, debug, error
 //
-// 1. you should push context in the first param when you have,
-//    context will always have trace id like logid within
-// 2. message passed should as short as you can, a log.K
-//    to represent every fields you want print
-// 3. use nil for context if there is no context
+//  1. you should push context in the first param when you have,
+//     context will always have trace id like logid within
+//  2. message passed should as short as you can, a log.K
+//     to represent every fields you want print
+//  3. use nil for context if there is no context
 package log
 
 import (
@@ -52,6 +52,17 @@ func BaseConfig(level string, isDebugEnv bool) {
 		dLogger = nil
 		iLogger = nil
 	}
+}
+
+func SetLogger(level string, logger *log.Logger) {
+    switch strings.ToLower(level) {
+    case "debug":
+        dLogger = logger
+    case "info":
+        iLogger = logger
+    case "error":
+        eLogger = logger
+    }
 }
 
 func ExtConfig(d, i, e *log.Logger) {
