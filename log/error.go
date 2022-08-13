@@ -25,7 +25,7 @@ var (
 	ErrRedis            = Err{Code: 5004, Msg: "redis error"}
 	ErrIPLocation       = Err{Code: 5005, Msg: "IP location error"}
 	ErrNetwork          = Err{Code: 5006, Msg: "network error"}
-	ErrJSON             = Err{Code: 5007, Msg: "json error"}
+	ErrSerialize        = Err{Code: 5007, Msg: "serialize error"}
 	ErrCipher           = Err{Code: 5008, Msg: "cipher error"}
 	ErrMachineID        = Err{Code: 5009, Msg: "machineID error"}
 	ErrPermissionDenied = Err{Code: 5010, Msg: "permission denied"}
