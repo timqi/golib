@@ -29,12 +29,15 @@ func GetLogID(c context.Context) string {
 	return logid
 }
 
-func NewWithID() context.Context {
+func NewWithID(IDs ...string) context.Context {
 	c := context.Background()
 	if debug {
 		return c
-	}
-	return context.WithValue(c, KEY_LOGID, xid.New().String())
+	} else if len(IDs) > 0 {
+        return context.WithValue(c, KEY_LOGID, IDs[0])
+    } else {
+	    return context.WithValue(c, KEY_LOGID, xid.New().String())
+    }
 }
 
 func GetUserID(c context.Context) int64 {

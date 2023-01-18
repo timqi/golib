@@ -1,162 +1,17 @@
-// log package for universal mono projects
-// base methods provided should info, debug, error
-//
-//  1. you should push context in the first param when you have,
-//     context will always have trace id like logid within
-//  2. message passed should as short as you can, a log.K
-//     to represent every fields you want print
-//  3. use nil for context if there is no context
 package log
 
 import (
 	"context"
 	"log"
-	"os"
+	"path/filepath"
 	"runtime"
-	"sort"
+	"strconv"
 	"strings"
-	"time"
 
 	"github.com/timqi/golib/ctx"
-	"github.com/timqi/golib/json"
 )
 
-func init() {
-	BaseConfig("debug", true)
-}
-
-var dLogger, iLogger, eLogger *log.Logger
-
-func GetErrorLogger() *log.Logger {
-	return eLogger
-}
-
 type K map[string]interface{}
-
-func BaseConfig(level string, isDebugEnv bool) {
-	if isDebugEnv {
-		flag := log.Ltime | log.Lmicroseconds
-		dLogger = log.New(os.Stdout, "\x1B[36mD ", flag|log.Lshortfile)
-		iLogger = log.New(os.Stdout, "\x1B[32mI ", flag|log.Lshortfile)
-		eLogger = log.New(os.Stderr, "\x1B[31mE ", flag)
-	} else {
-		flag := log.Ldate | log.Ltime | log.Lmicroseconds
-		dLogger = log.New(os.Stdout, "D ", flag|log.Lshortfile)
-		iLogger = log.New(os.Stdout, "I ", flag|log.Lshortfile)
-		eLogger = log.New(os.Stderr, "E ", flag)
-	}
-	switch strings.ToLower(level) {
-	case "info":
-		dLogger = nil
-	case "error":
-		dLogger = nil
-		iLogger = nil
-	}
-}
-
-func SetLogger(level string, logger *log.Logger) {
-    switch strings.ToLower(level) {
-    case "debug":
-        dLogger = logger
-    case "info":
-        iLogger = logger
-    case "error":
-        eLogger = logger
-    }
-}
-
-func ExtConfig(d, i, e *log.Logger) {
-	dLogger = d
-	iLogger = i
-	eLogger = e
-}
-
-func _buildLogString(
-	c context.Context,
-	message string,
-	fields K,
-	entries ...entry,
-) string {
-	var sb strings.Builder
-	if logID := ctx.GetLogID(c); logID != "" {
-		sb.WriteString(logID)
-		sb.WriteByte(' ')
-	}
-	sb.WriteString(message)
-
-	var ff []string
-	for k := range fields {
-		ff = append(ff, k)
-	}
-	sort.Strings(ff)
-
-	for _, k := range ff {
-		_buildLogKV(&sb, k, fields[k])
-	}
-	for _, entry := range entries {
-		_buildLogKV(&sb, entry.Key, entry.Val)
-	}
-	return sb.String()
-}
-
-func _buildLogKV(sb *strings.Builder, k string, v interface{}) {
-	sb.WriteByte(' ')
-	sb.WriteString(k)
-	sb.WriteByte('=')
-	switch t := v.(type) {
-	case error:
-		sb.WriteString(t.Error())
-	default:
-		vs, _ := json.Marshal(v)
-		sb.Write(vs)
-	}
-}
-
-func DebugK(c context.Context, message string, fields K) {
-	if dLogger != nil {
-		dLogger.Output(2, _buildLogString(c, message, fields))
-	}
-}
-
-func InfoK(c context.Context, message string, fields K) {
-	if iLogger != nil {
-		iLogger.Output(2, _buildLogString(c, message, fields))
-	}
-}
-
-func Debug(c context.Context, message string, entries ...entry) {
-	if dLogger != nil {
-		dLogger.Output(2, _buildLogString(c, message, nil, entries...))
-	}
-}
-
-func Info(c context.Context, message string, entries ...entry) {
-	if iLogger != nil {
-		iLogger.Output(2, _buildLogString(c, message, nil, entries...))
-	}
-}
-
-type pcs interface {
-	PCS() []uintptr
-}
-
-func Error(c context.Context, err Err) Err {
-	logID := ctx.GetLogID(c)
-	if logID != "" {
-		logID = logID + " "
-	}
-	eLogger.Println(logID + err.Error())
-
-	for _, pc := range err.PCS() {
-		f := runtime.FuncForPC(pc)
-		if f == nil {
-			break
-		}
-		file, line := f.FileLine(pc)
-		eLogger.Printf("%s  %s:%d\n", logID, file, line)
-	}
-	return err
-}
 
 type entry struct {
 	Key string
@@ -171,6 +26,100 @@ func KV(k string, v interface{}) entry {
 	return entry{Key: k, Val: v}
 }
 
-func UnixSec(t int64) string {
-	return time.Unix(t, 0).UTC().Format("2006-01-02T15:04:05Z")
+const (
+	DEBUG = 1 << iota
+	INFO
+	WARN
+	ERROR
+)
+
+func BaseConfig(level int, isDebug bool) {
+	configQ <- ChanCfg{
+		Level: level,
+		Debug: isDebug,
+	}
+}
+
+func SetLogger(level int, logger *log.Logger) {
+	setLoggerQ <- ChanSetLogger{
+		Level:  level,
+		Logger: logger,
+	}
+}
+
+func msgWithFile(message string) string {
+	_, file, line, ok := runtime.Caller(2)
+	if ok {
+		sb := &strings.Builder{}
+		sb.WriteString(filepath.Base(file))
+		sb.WriteByte(':')
+		sb.WriteString(strconv.Itoa(line))
+		sb.WriteByte(' ')
+		sb.WriteString(message)
+		return sb.String()
+	}
+	return message
+}
+
+func DebugK(c context.Context, message string, fields K) {
+	logQ <- ChanLog{
+		Level:   DEBUG,
+		LogID:   ctx.GetLogID(c),
+		Message: msgWithFile(message),
+		Fields:  fields,
+	}
+}
+
+func InfoK(c context.Context, message string, fields K) {
+	logQ <- ChanLog{
+		Level:   INFO,
+		LogID:   ctx.GetLogID(c),
+		Message: msgWithFile(message),
+		Fields:  fields,
+	}
+}
+
+func WarnK(c context.Context, message string, fields K) {
+	logQ <- ChanLog{
+		Level:   WARN,
+		LogID:   ctx.GetLogID(c),
+		Message: msgWithFile(message),
+		Fields:  fields,
+	}
+}
+
+func Debug(c context.Context, message string, entries ...entry) {
+	logQ <- ChanLog{
+		Level:   DEBUG,
+		LogID:   ctx.GetLogID(c),
+		Message: msgWithFile(message),
+		Entries: entries,
+	}
+}
+
+func Info(c context.Context, message string, entries ...entry) {
+	logQ <- ChanLog{
+		Level:   INFO,
+		LogID:   ctx.GetLogID(c),
+		Message: msgWithFile(message),
+		Entries: entries,
+	}
+}
+
+func Warn(c context.Context, message string, entries ...entry) {
+	logQ <- ChanLog{
+		Level:   WARN,
+		LogID:   ctx.GetLogID(c),
+		Message: msgWithFile(message),
+		Entries: entries,
+	}
+}
+
+func Error(c context.Context, err Err) Err {
+	logQ <- ChanLog{
+		Level: ERROR,
+		LogID: ctx.GetLogID(c),
+		Err:   &err,
+	}
+	return err
 }
